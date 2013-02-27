@@ -44,10 +44,6 @@ begin:
 
 cur_proc:
   .word 0x0
-target_seg:
-  .word 0x0
-target_offset:
-  .word 0x0
 
   .space  256, 0
 proc_stack_top_a:
