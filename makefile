@@ -17,5 +17,12 @@ process.elf: process.o
 	ld -m elf_i386 -static -Tas.ld -nostdlib --nmagic -o $@ $<
 process.o: process.S
 	$(CC) $(CFLAGS) -c $<
+
+simple_proc.com: simple_proc.elf
+	objcopy -R .pdr -R .comment -R.note -S -O binary $< $@
+simple_proc.elf: simple_proc.o
+	ld -m elf_i386 -static -Tas.ld -nostdlib --nmagic -o $@ $<
+simple_proc.o: simple_proc.S
+	$(CC) $(CFLAGS) -c $<
 clean:
 	rm -rf *.o *.com *.elf
