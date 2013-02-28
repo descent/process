@@ -21,43 +21,30 @@ begin:
   movw    %ax, %gs
 
 ## set stack frame eip
-  movw $proc_a, stack_frame
-  movw $proc_b, stack_frame+STACK_FRAME_OFFSET
+  movw $proc_a, stack_frame_a+2
+  movw $proc_b, stack_frame_b+2
 
 ## set stack frame cs
   movw %cs, %ax
-  movw %ax, stack_frame+2
-  movw %ax, stack_frame+STACK_FRAME_OFFSET+2
+  movw %ax, stack_frame_a+4
+  movw %ax, stack_frame_b+4
 
 ## set stack frame flag
   # get flag
   pushf
   movw (%esp), %ax
   popf
-  movw %ax, stack_frame+4
-  movw %ax, stack_frame+STACK_FRAME_OFFSET+4
+  movw %ax, stack_frame_a+6
+  movw %ax, stack_frame_b+6
 
-  int $0x30
+  movw $stack_frame_a, cur_proc
+  movw cur_proc, %sp
+  popw %ax
+  iret
 
   mov $0x4c00, %ax
   int $0x21           
 
-cur_proc:
-  .word 0x0
-
-  .space  256, 0
-proc_stack_top_a:
-  .space  256, 0
-proc_stack_top_b:
-
-stack_frame:
-  .word 0x0# eip
-  .word 0x1# cs
-  .word 0x2# flag
-
-  .word 0x0# eip
-  .word 0x1# cs
-  .word 0x2# flag
 
 .global proc_a
 proc_a:
@@ -69,20 +56,42 @@ proc_a:
 .global proc_b
 proc_b:
 1:
-  mov $0x2, %bl
+  mov $0x2, %al
   int $0x30
   jmp 1b
 
 .global switch_proc
 switch_proc:
+  pushw %ax
   movw cur_proc, %dx
-  cmp $stack_frame, %dx
+  cmp $stack_frame_a, %dx
   je 1f
-  movw $stack_frame, cur_proc
+  movw $stack_frame_a, cur_proc
   jmp 2f
 1:
-  movw $stack_frame+STACK_FRAME_OFFSET, cur_proc
+  movw $stack_frame_b, cur_proc
 2:
   movw cur_proc, %sp
+  popw %ax
   iret
 
+
+cur_proc:
+  .word 0x0
+
+  .space  256, 0
+proc_stack_top_a:
+  .space  256, 0
+proc_stack_top_b:
+
+stack_frame_a:
+  .word 0x9# ax
+  .word 0x0# eip
+  .word 0x1# cs
+  .word 0x2# flag
+
+stack_frame_b:
+  .word 0x9# ax
+  .word 0x0# eip
+  .word 0x1# cs
+  .word 0x2# flag
