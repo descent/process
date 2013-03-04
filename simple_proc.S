@@ -49,15 +49,25 @@ begin:
 .global proc_a
 proc_a:
 1:
-  mov $0x1, %ax
+#  mov $0x1, %ax
+
+  movw var_a,%ax
   int $0x30
+  addw $0x1,%ax
+  movw %ax, var_a
+
   jmp 1b
 
 .global proc_b
 proc_b:
 1:
-  mov $0x2, %al
+#  mov $0x2, %al
+
+  movw var_a,%ax
+  addw $0x1,%ax
+  movw %ax, var_a
   int $0x30
+
   jmp 1b
 
 .global switch_proc
@@ -78,6 +88,8 @@ switch_proc:
 
 cur_proc:
   .word 0x0
+var_a:
+  .word 0x0
 
   .space  256, 0
 proc_stack_top_a:
@@ -95,3 +107,12 @@ stack_frame_b:
   .word 0x0# eip
   .word 0x1# cs
   .word 0x2# flag
+
+#if 0
+static int a;
+++a;
+
+mov    0x804a018,%eax
+add    $0x1,%eax
+mov    %eax,0x804a018
+#endif
