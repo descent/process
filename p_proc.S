@@ -11,6 +11,23 @@
     .byte   (\Base >> 24) & 0xFF
 .endm
 
+.set    DA_386IGate, 0x8E    /* 32-bit Interrupt Gate */
+
+/* Gate Descriptor data structure.
+   Usage: Gate Selector, Offset, PCount, Attr
+    Selector:  2byte
+    Offset:    4byte
+    PCount:    byte
+    Attr:      byte */
+.macro Gate  Selector, Offset, PCount, Attr
+    .2byte     (\Offset & 0xFFFF)
+    .2byte     \Selector
+    .2byte     (\PCount & 0x1F) | ((\Attr << 8) & 0xFF00)
+    .2byte     ((\Offset >> 16) & 0xFFFF)
+.endm
+
+
+
 .set    DA_32,  0x4000  /* 32-bit segment */
 .set    DA_LIMIT_4K, 0x8000     /* 4K */
 .set    DA_CR,   0x9A   /* Execute/Read */
@@ -25,99 +42,84 @@ gdt_ptr: .2byte (gdt_len -1 ) # limit
 
 .set selector_code, (gdt1-gdt0)
 .set selector_data, (gdt2-gdt0)
+
+idt:
+.rept 200
+Gate selector_code, switch_proc_offset, 0, DA_386IGate
+.endr
+.set idt_len, (. - idt)  /* IDT Length */
+
+idt_ptr: .2byte  (idt_len - 1)  /* IDT Limit */
+         .4byte  0             /* IDT Base */
+
+
 .text
 .global begin
 begin:
   xchg %bx, %bx #bochs magic break point
-## set stack frame flag
-  # get flag
-  pushf
-  movw (%esp), %ax
-  popf
-  movw %ax, stack_frame_a+6
-  movw %ax, stack_frame_b+6
-  cli
+
+    /* Initialize 32-bits code segment descriptor. */
+    xor     %eax, %eax
+    mov     %cs, %ax
+    shl     $4, %eax
+#    addl    $seg_code32, %eax
+    movw    %ax, (gdt1 + 2)
+    shr     $16, %eax
+    movb    %al, (gdt1 + 4)
+    movb    %ah, (gdt1 + 7)
+
+    /* Initialize 32-bits data segment descriptor. */
+    xor     %eax, %eax
+    mov     %cs, %ax
+    shl     $4, %eax
+#    addl    $seg_code32, %eax
+    movw    %ax, (gdt2 + 2)
+    shr     $16, %eax
+    movb    %al, (gdt2 + 4)
+    movb    %ah, (gdt2 + 7)
 
   xor     %eax, %eax
-  mov     %cs,%ax
-  mov     %ax,%ds
-  movw    %ax, my_cs
-  movw    %ax, my_ss
+  mov     %cs, %ax
+  shl     $4, %eax
+  add     $gdt0, %eax      /* eax <- gdt base*/
+  movl    %eax, (gdt_ptr + 2)
+  lgdt gdt_ptr
 
-## reset 0x30 interrupt
-  movw    $0x0, %bx
-  movw    %bx, %es
-  movw $switch_proc, %es:32 # isr offset
-  movw %ax, %es:34 #isr seg
+    /* Prepared for loading IDTR */
+    xor     %eax, %eax
+    mov     %ds, %ax
+    shl     $4, %eax
+    add     $idt, %eax      /* eax <- idt base*/
+    movl    %eax, (idt_ptr + 2)
 
-  movw    $0xb800, %ax
-  movw    %ax, %gs
+  cli
 
-## set stack frame eip
-  movw $proc_a, stack_frame_a+2
-  movw $proc_b, stack_frame_b+2
+  lidt idt_ptr
 
-## set stack frame cs
-  movw %cs, %ax
-  movw %ax, stack_frame_a+4
-  movw %ax, stack_frame_b+4
+  # open a20 line
+  inb $0x92, %al
+  orb $0b00000010, %al
+  outb %al, $0x92
 
 
-  movw $stack_frame_a, cur_proc
-  movw cur_proc, %sp
-  popw %ax
-  iret
+  # enable protect mode
+  movl %cr0, %eax
+  orl $1, %eax
+  movl %eax, %cr0
+
+
+  xchg %bx, %bx #bochs magic break point
+  ljmpl $selector_code, $seg_code32
+
+
 
   mov $0x4c00, %ax
   int $0x21           
 
 
-.global proc_a
-proc_a:
-1:
-  mov $0x1, %ax
-  #int $0x1c
-  jmp 1b
-
-.global proc_b
-proc_b:
-1:
-  mov $0x2, %al
-  #int $0x1c
-  jmp 1b
-
-.global switch_proc
-switch_proc:
-  xchg %bx, %bx #bochs magic break point
-#  movw %cs:my_ss, %ds
-#  movw %cs:my_ss, %ss
-#  movw cur_proc, %sp
-  pushw %ax
-
-  inb $0x21, %al
-  orb $0x1 ,%al
-  outb %al, $0x21
-
-  movw cur_proc, %dx
-  cmp $stack_frame_a, %dx
-  je 1f
-  movw $stack_frame_a, cur_proc
-  jmp 2f
-1:
-  movw $stack_frame_b, cur_proc
-2:
-  cli
-  inb $0x21, %al
-  andb $0xfe ,%al
-  outb %al, $0x21
-
-  movw cur_proc, %sp
-  popw %ax
-  iret
 
 
-cur_proc:
-  .word 0x0
+
 dos_cs:
   .word 0x0
 dos_ss:
@@ -136,14 +138,123 @@ proc_stack_top_a:
   .space  256, 0
 proc_stack_top_b:
 
+
+.code32
+seg_code32:
+  mov $selector_data, %ax
+  mov %ax, %ds
+  mov %ax, %ss
+  mov $proc_stack_top, %esp
+
+## set stack frame flag
+  # get flag
+  pushf
+  movl (%esp), %eax
+  popf
+  movl %eax, stack_frame_a+12
+  movl %eax, stack_frame_b+12
+  cli
+
+## set stack frame eip
+  movl $proc_a, stack_frame_a+4
+  movl $proc_b, stack_frame_b+4
+
+## set stack frame cs
+  xor     %eax, %eax
+  movw %cs, %ax
+  movw %ax, stack_frame_a+8
+  movw %ax, stack_frame_b+8
+
+
+  movl $stack_frame_a, cur_proc
+  movl cur_proc, %esp
+  popl %eax
+  iret
+
+
+
+
+  mov $selector_data, %ax
+  int $0x30
+  mov %ax, %ds
+  mov %ax, %es
+  mov %ax, %ss
+  mov $0xb8004, %edi    /* Destination */
+  movb $'P', (%edi)
+  mov $0xb8005, %edi    /* Destination */
+  movb $0x9, (%edi)
+
+
+
+
+.global proc_a
+proc_a:
+1:
+  mov $0x1, %ax
+  int $0x30
+  jmp 1b
+
+.global proc_b
+proc_b:
+1:
+  mov $0x2, %al
+  int $0x30
+  jmp 1b
+
+
+.global int0x30
+int0x30:
+.set int0x30_offset, (. - seg_code32)
+  mov $0x1, %cx;
+  iret
+.global switch_proc
+switch_proc:
+.set switch_proc_offset, (. - begin+0x100)
+  xchg %bx, %bx #bochs magic break point
+#  movw %cs:my_ss, %ds
+#  movw %cs:my_ss, %ss
+#  movw cur_proc, %sp
+  push %eax
+
+#if 0
+  inb $0x21, %al
+  orb $0x1 ,%al
+  outb %al, $0x21
+#endif
+
+  movl cur_proc, %edx
+  cmpl $stack_frame_a, %edx
+  je 1f
+  movl $stack_frame_a, cur_proc
+  jmp 2f
+1:
+  movl $stack_frame_b, cur_proc
+2:
+
+#if 0
+  cli
+  inb $0x21, %al
+  andb $0xfe ,%al
+  outb %al, $0x21
+#endif
+
+  movl cur_proc, %esp
+  pop %eax
+  iret
+
 stack_frame_a:
-  .word 0x9# ax
-  .word 0x0# eip
-  .word 0x1# cs
-  .word 0x2# flag
+  .long 0x9# eax
+  .long 0x0# eip
+  .long 0x0# cs
+  .long 0x2# flag
 
 stack_frame_b:
-  .word 0x9# ax
-  .word 0x0# eip
-  .word 0x1# cs
-  .word 0x2# flag
+  .long 0x9# ax
+  .long 0x0# eip
+  .long 0x0# cs
+  .long 0x2# flag
+cur_proc:
+  .long 0x0
+
+  .space  256, 0
+proc_stack_top:
