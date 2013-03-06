@@ -32,16 +32,32 @@
 .set    DA_LIMIT_4K, 0x8000     /* 4K */
 .set    DA_CR,   0x9A   /* Execute/Read */
 .set    DA_DRW,  0x92   /* Read/Write */
+.set    DA_DPL3,  0x60  /* DPL = 3 */
+.set    DA_C,    0x98   /* Execute-Only */
+.set    DA_DRWA, 0x93   /* Read/Write, accessed */
+
+
+
+.set    SA_RPL3, 3
+
 
 gdt0: Descriptor  0, 0, 0
 gdt1: Descriptor  0, 0xfffff, DA_CR | DA_32 | DA_LIMIT_4K
 gdt2: Descriptor  0, 0xfffff, DA_DRW | DA_32 | DA_LIMIT_4K
+proc_a_desc:  Descriptor  0, 0xfffff, (DA_C + DA_32 + DA_DPL3)
+proc_b_desc:  Descriptor  0, 0xfffff, (DA_C + DA_32 + DA_DPL3)
+proc_data_desc:  Descriptor  0, 0xfffff, (DA_DRWA + DA_32 + DA_DPL3)
+
 .set gdt_len, (. - gdt0)
 gdt_ptr: .2byte (gdt_len -1 ) # limit
          .4byte 0             # base
 
 .set selector_code, (gdt1-gdt0)
 .set selector_data, (gdt2-gdt0)
+.set sel_proc_a,  (proc_a_desc - gdt0 + SA_RPL3)
+.set sel_proc_b,  (proc_b_desc - gdt0 + SA_RPL3)
+.set sel_proc_data,  (proc_data_desc - gdt0 + SA_RPL3)
+
 
 idt:
 .rept 200
@@ -77,6 +93,15 @@ begin:
     shr     $16, %eax
     movb    %al, (gdt2 + 4)
     movb    %ah, (gdt2 + 7)
+
+    /* Initialize 32-bits proc ring3 segment descriptor. */
+    xor     %eax, %eax
+    mov     %cs, %ax
+    shl     $4, %eax
+    movw    %ax, (proc_a_desc + 2)
+    shr     $16, %eax
+    movb    %al, (proc_a_desc + 4)
+    movb    %ah, (proc_a_desc + 7)
 
   xor     %eax, %eax
   mov     %cs, %ax
@@ -133,10 +158,6 @@ my_ss:
 my_sp:
   .word 0x0
 
-  .space  256, 0
-proc_stack_top_a:
-  .space  256, 0
-proc_stack_top_b:
 
 
 .code32
@@ -161,15 +182,27 @@ seg_code32:
 
 ## set stack frame cs
   xor     %eax, %eax
-  movw %cs, %ax
+  movw $sel_proc_a, %ax
+  #movw $selector_code, %ax
   movw %ax, stack_frame_a+8
   movw %ax, stack_frame_b+8
+
+
+## set stack frame esp
+  movw $proc_stack_top_a, stack_frame_a+16
+  movw $proc_stack_top_b, stack_frame_b+16
+
+## set stack frame ss
+#  movw %ss, %ax
+  movw $sel_proc_data, stack_frame_a+20
+  movw $sel_proc_data, stack_frame_b+20
 
 
   movl $stack_frame_a, cur_proc
   movl cur_proc, %esp
   popl %eax
-  iret
+  xchg %bx, %bx #bochs magic break point
+  iretl
 
 
 
@@ -210,7 +243,6 @@ int0x30:
 .global switch_proc
 switch_proc:
 .set switch_proc_offset, (. - begin+0x100)
-  xchg %bx, %bx #bochs magic break point
 #  movw %cs:my_ss, %ds
 #  movw %cs:my_ss, %ss
 #  movw cur_proc, %sp
@@ -247,14 +279,24 @@ stack_frame_a:
   .long 0x0# eip
   .long 0x0# cs
   .long 0x2# flag
+  .long 0x2# esp
+  .long 0x2# ss
 
 stack_frame_b:
   .long 0x9# ax
   .long 0x0# eip
   .long 0x0# cs
   .long 0x2# flag
+  .long 0x2# esp
+  .long 0x2# ss
 cur_proc:
   .long 0x0
 
   .space  256, 0
 proc_stack_top:
+
+  .space  256, 0
+proc_stack_top_a:
+
+  .space  256, 0
+proc_stack_top_b:
