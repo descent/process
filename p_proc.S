@@ -1,6 +1,15 @@
 # in protected mode, do process switch
+#if 0
+note:
+Gate selector_code, switch_proc_offset, 0, (DA_386IGate+DA_DPL3)
 
-#define STACK_FRAME_OFFSET 6
+when use idt to switch ring3 -> ring0, _DPL3 must be added.
+then int instruction will change %ss: %esp, so tss ss0:esp0 need right value.
+
+#endif
+
+#define STACK_FRAME_FOR_SS 24
+
 .code16
 .data
 .macro Descriptor Base, Limit, Attr
@@ -35,8 +44,7 @@
 .set    DA_DPL3,  0x60  /* DPL = 3 */
 .set    DA_C,    0x98   /* Execute-Only */
 .set    DA_DRWA, 0x93   /* Read/Write, accessed */
-
-
+.set    DA_386TSS,   0x89    /* 32-bit TSS(Available) */
 
 .set    SA_RPL3, 3
 
@@ -47,6 +55,8 @@ gdt2: Descriptor  0, 0xfffff, DA_DRW | DA_32 | DA_LIMIT_4K
 proc_a_desc:  Descriptor  0, 0xfffff, (DA_C + DA_32 + DA_DPL3)
 proc_b_desc:  Descriptor  0, 0xfffff, (DA_C + DA_32 + DA_DPL3)
 proc_data_desc:  Descriptor  0, 0xfffff, (DA_DRWA + DA_32 + DA_DPL3)
+tss_desc: Descriptor  0, (TSS_LEN - 1), DA_386TSS
+
 
 .set gdt_len, (. - gdt0)
 gdt_ptr: .2byte (gdt_len -1 ) # limit
@@ -57,16 +67,49 @@ gdt_ptr: .2byte (gdt_len -1 ) # limit
 .set sel_proc_a,  (proc_a_desc - gdt0 + SA_RPL3)
 .set sel_proc_b,  (proc_b_desc - gdt0 + SA_RPL3)
 .set sel_proc_data,  (proc_data_desc - gdt0 + SA_RPL3)
+.set sel_tss,  (tss_desc - gdt0)
 
 
 idt:
 .rept 200
-Gate selector_code, switch_proc_offset, 0, DA_386IGate
+Gate selector_code, switch_proc_offset, 0, (DA_386IGate+DA_DPL3)
 .endr
 .set idt_len, (. - idt)  /* IDT Length */
 
 idt_ptr: .2byte  (idt_len - 1)  /* IDT Limit */
          .4byte  0             /* IDT Base */
+
+LABEL_TSS:
+    .4byte  0           /* Back Link */
+    .4byte  0  /* ESP0 */
+    .4byte  0 /* SS0 */
+    .4byte  0           /* ESP1 */
+    .4byte  0           /* SS1 */
+    .4byte  0           /* ESP2 */
+    .4byte  0           /* SS2 */
+    .4byte  0           /* CR3(PDBR) */
+    .4byte  0           /* EIP */
+    .4byte  0           /* EFLAGS */
+    .4byte  0           /* EAX */
+    .4byte  0           /* ECX */
+    .4byte  0           /* EDX */
+    .4byte  0           /* EBX */
+    .4byte  0           /* ESP */
+    .4byte  0           /* EBP */
+    .4byte  0           /* ESI */
+    .4byte  0           /* EDI */
+    .4byte  0           /* ES */
+    .4byte  0           /* CS */
+    .4byte  0           /* SS */
+    .4byte  0           /* DS */
+    .4byte  0           /* FS */
+    .4byte  0           /* GS */
+    .4byte  0           /* LDT Segment Selector */
+    .2byte  0           /* Trap Flag: 1-bit */
+    .2byte  (. - LABEL_TSS + 2)     /* I/O Map Base Address */
+    .byte   0xff        /* End */
+.set    TSS_LEN, (. - LABEL_TSS)
+
 
 
 .text
@@ -93,6 +136,21 @@ begin:
     shr     $16, %eax
     movb    %al, (gdt2 + 4)
     movb    %ah, (gdt2 + 7)
+
+
+    # Initialize tss
+
+
+        xor     %eax, %eax
+        mov     %ds, %ax
+        shl     $4, %eax
+        addl    $(LABEL_TSS), %eax
+        movw    %ax, (tss_desc + 2)
+        shr     $16, %eax
+        movb    %al, (tss_desc + 4)
+        movb    %ah, (tss_desc + 7)
+
+
 
     /* Initialize 32-bits proc ring3 segment descriptor. */
     xor     %eax, %eax
@@ -121,6 +179,14 @@ begin:
 
   lidt idt_ptr
 
+
+
+  movw $selector_data, LABEL_TSS+8 # ss0
+  movl $proc_stack_top, LABEL_TSS+4 # esp0
+
+
+
+
   # open a20 line
   inb $0x92, %al
   orb $0b00000010, %al
@@ -133,32 +199,12 @@ begin:
   movl %eax, %cr0
 
 
-  xchg %bx, %bx #bochs magic break point
   ljmpl $selector_code, $seg_code32
 
 
 
   mov $0x4c00, %ax
   int $0x21           
-
-
-
-
-
-dos_cs:
-  .word 0x0
-dos_ss:
-  .word 0x0
-dos_sp:
-  .word 0x0
-my_cs:
-  .word 0x0
-my_ss:
-  .word 0x0
-my_sp:
-  .word 0x0
-
-
 
 .code32
 seg_code32:
@@ -202,6 +248,13 @@ seg_code32:
   movl cur_proc, %esp
   popl %eax
   xchg %bx, %bx #bochs magic break point
+
+  movw $selector_data, LABEL_TSS+8 # ss0
+  movl $stack_frame_a+STACK_FRAME_FOR_SS, LABEL_TSS+4 # esp0
+
+  mov $sel_tss, %ax    /* Load TSS to TR register */
+  ltr %ax
+
   iretl
 
 
@@ -240,6 +293,7 @@ int0x30:
 .set int0x30_offset, (. - seg_code32)
   mov $0x1, %cx;
   iret
+
 .global switch_proc
 switch_proc:
 .set switch_proc_offset, (. - begin+0x100)
@@ -247,6 +301,8 @@ switch_proc:
 #  movw %cs:my_ss, %ss
 #  movw cur_proc, %sp
   push %eax
+  mov $selector_data, %ax
+  mov %ax, %ds
 
 #if 0
   inb $0x21, %al
@@ -270,6 +326,9 @@ switch_proc:
   outb %al, $0x21
 #endif
 
+  movl cur_proc, %eax
+  addl $24, %eax
+  movl %eax, LABEL_TSS+4 # esp0
   movl cur_proc, %esp
   pop %eax
   iret
