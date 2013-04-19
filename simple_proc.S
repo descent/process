@@ -37,19 +37,19 @@ begin:
   movw %ax, stack_frame_a+6
   movw %ax, stack_frame_b+6
 
-  movw $stack_frame_a, cur_proc
-  movw cur_proc, %sp
+  movw $stack_frame_a, a_sp
+  movw $stack_frame_b, b_sp
+
+  movw $stack_frame_a, %sp
+
   popw %ax
   iret
-
-  mov $0x4c00, %ax
-  int $0x21           
-
 
 .global proc_a
 proc_a:
 1:
   mov $0x1, %ax
+  push %cx
   int $0x30
   jmp 1b
 
@@ -57,6 +57,7 @@ proc_a:
 proc_b:
 1:
   mov $0x2, %al
+  push %bx
   int $0x30
   jmp 1b
 
@@ -64,19 +65,33 @@ proc_b:
 switch_proc:
   pushw %ax
   movw cur_proc, %dx
-  cmp $stack_frame_a, %dx
-  je 1f
-  movw $stack_frame_a, cur_proc
+
+# 0 run proc_a
+# 1 run proc_b
+  cmp $0, %dx
+  jne 1f
+  # save cur_esp to a_sp
+  movw %esp, a_sp
+  movw b_sp, %ax
+  movw $1, cur_proc
   jmp 2f
 1:
-  movw $stack_frame_b, cur_proc
+  # save cur_esp to b_sp
+  movw %esp, b_sp
+  movw a_sp, %ax
+  movw $0, cur_proc
 2:
-  movw cur_proc, %sp
+
+  movw %ax, %sp
   popw %ax
   iret
 
 
 cur_proc:
+  .word 0x0
+a_sp:
+  .word 0x0
+b_sp:
   .word 0x0
 
   .space  256, 0
@@ -84,12 +99,17 @@ proc_stack_top_a:
   .space  256, 0
 proc_stack_top_b:
 
+
+
+  .space  256, 0
 stack_frame_a:
   .word 0x9# ax
   .word 0x0# eip
   .word 0x1# cs
   .word 0x2# flag
 
+
+  .space  256, 0
 stack_frame_b:
   .word 0x9# ax
   .word 0x0# eip
