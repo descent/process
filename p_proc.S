@@ -115,7 +115,7 @@ LABEL_TSS:
 .text
 .global begin
 begin:
-  xchg %bx, %bx #bochs magic break point
+  #xchg %bx, %bx #bochs magic break point
 
     /* Initialize 32-bits code segment descriptor. */
     xor     %eax, %eax
@@ -208,6 +208,7 @@ begin:
 
 .code32
 seg_code32:
+  #xchg %bx, %bx #bochs magic break point
   mov $selector_data, %ax
   mov %ax, %ds
   mov %ax, %ss
@@ -277,6 +278,7 @@ seg_code32:
 proc_a:
 1:
   mov $0x1, %ax
+  push %ebx
   int $0x30
   jmp 1b
 
@@ -284,6 +286,7 @@ proc_a:
 proc_b:
 1:
   mov $0x2, %al
+  push %ecx
   int $0x30
   jmp 1b
 
