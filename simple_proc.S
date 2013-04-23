@@ -1,4 +1,4 @@
-#define STACK_FRAME_OFFSET 6
+# save/restore stack in ms dos (x86 real mode)
 .code16
 .text
 .global begin
