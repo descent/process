@@ -10,6 +10,12 @@ CC=gcc
 
 CPPFLAGS = -m32  -g -Wall -Wextra -Werror -nostdlib -fno-builtin -nostartfiles -nodefaultlibs -fno-exceptions -fno-rtti -fno-stack-protector
 
+simple_proc_signal.com: simple_proc_signal.elf
+	objcopy -R .pdr -R .comment -R.note -S -O binary $< $@
+simple_proc_signal.elf: simple_proc_signal.o
+	ld -m elf_i386 -static -Tas.ld -nostdlib --nmagic -o $@ $<
+simple_proc_signal.o: simple_proc_signal.S
+	$(CC) $(CFLAGS) -c $<
 
 process.com: process.elf
 	objcopy -R .pdr -R .comment -R.note -S -O binary $< $@
