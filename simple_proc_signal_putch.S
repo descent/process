@@ -45,6 +45,9 @@ begin:
   int $0x21           
 
 
+cnt_for_exit:
+  .word 0x0
+
 org_eip:
   .word 0x0
 
@@ -148,6 +151,15 @@ sig_handle:
   mov     $0, %cx
   mov $0x4, %esi
   movw $0x075a, %gs:(%esi) # Z
+
+  add $1, cnt_for_exit
+
+  mov cnt_for_exit, %cx
+  cmp $10000, %cx
+  jne skip_exit
+  mov $0x4c00, %ax
+  int $0x21           
+skip_exit:
   ret
 
 .global sig_return
