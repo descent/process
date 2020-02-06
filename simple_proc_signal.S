@@ -43,14 +43,15 @@ begin:
   mov $0x4c00, %ax
   int $0x21           
 
-cur_proc:
-  .word 0x0
 
 org_eip:
   .word 0x0
 
 is_sig_return:
   .word 0x0
+
+cur_proc:
+  .word stack_frame + STACK_FRAME_OFFSET
 
   .space  256, 0
 proc_stack_top_a:
@@ -68,6 +69,7 @@ stack_frame:
   .word 0x2# flag
   .word 0x3# ret_signal
 
+
 .global proc_a
 proc_a:
 1:
@@ -84,14 +86,11 @@ proc_b:
 
 .global switch_proc
 switch_proc:
-  #movl is_sig_return, %eax
-  #movw (%eax), %bx 
   movw is_sig_return, %bx
   cmp $1, %bx
   jne skip_restore_eip
 
   movw org_eip, %bx # get original eip
-#  movw (%eax), %bx 
 
   movl $0, %eax
   movw cur_proc, %ax
@@ -103,7 +102,7 @@ skip_restore_eip:
   add $1, %cx
 
   movw cur_proc, %dx
-  cmp $stack_frame, %dx
+  cmp $stack_frame, %dx # 假如目前 cur_proc 是 stack_frame, 就將 cur_proc 設定為 stack_frame+STACK_FRAME_OFFSET (另外一個 process)
   je 1f
   movw $stack_frame, cur_proc
   jmp 2f
@@ -111,17 +110,15 @@ skip_restore_eip:
   movw $stack_frame+STACK_FRAME_OFFSET, cur_proc
 2:
 
-  cmp $7, %cx
+  cmp $3, %cx
   jne skip_setup_signal
   xchg %bx, %bx #bochs magic break point
-#  movw cur_proc, %dx  # save original eip 
-#  movw %dx, org_eip  
 
   movl $0, %eax
   movl cur_proc, %eax
 
   movw (%eax), %bx 
-  mov %bx, org_eip # save original eip to org_eip
+  movw %bx, org_eip # save original eip to org_eip
 
   movw $sig_handle, (%eax) # set eip to sig_handle
   movw $sig_return, 6(%eax) # set eip to sig_return
@@ -139,5 +136,6 @@ sig_handle:
 .global sig_return
 sig_return:
   movw $1, is_sig_return
+  sub $2, %sp
   int $0x30
 
